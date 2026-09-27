@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlanAR - Transform PDF Blueprints into 3D AR Spatial Walkthroughs</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Montserrat, Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,300..900;1,300..900&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Three.js CDN for interactive 3D rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Montserrat', 'Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            cyan: '#06b6d4',
+                            emerald: '#10b981',
+                            accent: '#a855f7'
+                        },
+                        dark: {
+                            bg: '#090a0f',
+                            card: '#11131e',
+                            border: '#1f2438',
+                            surface: '#181b2a'
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'glow': 'glow 3s ease-in-out infinite alternate',
+                    },
+                    keyframes: {
+                        glow: {
+                            '0%': { opacity: 0.4, transform: 'scale(1)' },
+                            '100%': { opacity: 0.8, transform: 'scale(1.05)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background-color: #090a0f;
+            color: #f3f4f6;
+            font-family: 'Montserrat', 'Inter', sans-serif;
+            overflow-x: hidden;
+            perspective: 1200px;
+        }
+        
+        .glow-bg {
+            background: radial-gradient(circle at 50% 20%, rgba(99, 102, 241, 0.15) 0%, rgba(6, 182, 212, 0.05) 40%, rgba(9, 10, 15, 0) 70%);
+        }
+
+        .glass-panel {
+            background: rgba(17, 19, 30, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transform-style: preserve-3d;
+            transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1), border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-panel-hover:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 20px 40px -15px rgba(99, 102, 241, 0.3);
+        }
+
+        /* 3D Floating and Pulse Keyframes */
+        @keyframes float3d {
+            0% { transform: translateY(0px) rotateX(0deg) rotateY(0deg); }
+            50% { transform: translateY(-12px) rotateX(3deg) rotateY(-2deg); }
+            100% { transform: translateY(0px) rotateX(0deg) rotateY(0deg); }
+        }
+
+        @keyframes pulseGlow3d {
+            0% { transform: translateZ(0px) scale(1); opacity: 0.4; }
+            50% { transform: translateZ(20px) scale(1.04); opacity: 0.8; }
+            100% { transform: translateZ(0px) scale(1); opacity: 0.4; }
+        }
+
+        @keyframes shimmer3dSweep {
+            0% {
+                transform: translateX(-150%) skewX(-25deg) rotateY(-20deg) translateZ(-100px);
+                opacity: 0;
+            }
+            15% {
+                opacity: 0.95;
+            }
+            85% {
+                opacity: 0.85;
+            }
+            100% {
+                transform: translateX(250%) skewX(-25deg) rotateY(20deg) translateZ(100px);
+                opacity: 0;
+            }
+        }
+
+        .shimmer-3d-beam {
+            position: absolute;
+            top: -50%;
+            bottom: -50%;
+            width: 60%;
+            background: linear-gradient(
+                90deg, 
+                transparent 0%, 
+                rgba(99, 102, 241, 0.25) 20%, 
+                rgba(6, 182, 212, 0.6) 50%, 
+                rgba(168, 85, 247, 0.4) 70%, 
+                transparent 100%
+            );
+            filter: blur(14px);
+            transform-style: preserve-3d;
+            animation: shimmer3dSweep 2.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            pointer-events: none;
+        }
+
+        .shimmer-3d-beam-secondary {
+            position: absolute;
+            top: -50%;
+            bottom: -50%;
+            width: 35%;
+            background: linear-gradient(
+                90deg, 
+                transparent 0%, 
+                rgba(255, 255, 255, 0.7) 50%, 
+                transparent 100%
+            );
+            filter: blur(8px);
+            transform-style: preserve-3d;
+            animation: shimmer3dSweep 1.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+            pointer-events: none;
+        }
+
+        .animate-float-3d {
+            animation: float3d 6s ease-in-out infinite;
+        }
+
+        .tilt-card {
+            will-change: transform;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #ffffff 0%, #a5b4fc 50%, #06b6d4 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .gradient-border {
+            position: relative;
+            border-radius: 1rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(6, 182, 212, 0.1));
+            padding: 1px;
+        }
+
+        .grid-pattern {
+            background-size: 40px 40px;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+
+        canvas {
+            display: block;
+            outline: none;
+        }
+        
+        /* Custom slider styles */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: #1f2438;
+            border-radius: 8px;
+            height: 6px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.8);
+        }
+    </style>
+</head>
+<body class="relative min-h-screen grid-pattern antialiased selection:bg-brand-500 selection:text-white">
+
+    <!-- 3D Page Load Shimmer Overlay FX -->
+    <div id="pageShimmerOverlay" class="fixed inset-0 pointer-events-none z-[100] overflow-hidden perspective-[1000px] transition-opacity duration-700 ease-out">
+        <div class="shimmer-3d-beam"></div>
+        <div class="shimmer-3d-beam-secondary"></div>
+    </div>
+
+    <!-- Sticky Navigation -->
+    <header class="fixed top-0 left-0 right-0 z-50 glass-panel border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <!-- Logo -->
+                <a href="#" class="flex items-center gap-3 group">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-brand-cyan p-0.5 shadow-lg shadow-brand-500/20 group-hover:shadow-brand-500/40 transition-all">
+                        <div class="w-full h-full bg-dark-bg rounded-[10px] flex items-center justify-center">
+                            <i data-lucide="box" class="w-5 h-5 text-brand-400 group-hover:rotate-12 transition-transform"></i>
+                        </div>
+                    </div>
+                    <span class="text-xl font-bold tracking-tight text-white">Plan<span class="text-brand-400">AR</span></span>
+                </a>
+
+                <!-- Desktop Nav Links -->
+                <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-300">
+                    <a href="#how-it-works" class="hover:text-white transition-colors">How It Works</a>
+                    <a href="#interactive-demo" class="hover:text-white transition-colors flex items-center gap-1.5">
+                        <span class="relative flex h-2 w-2">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-cyan opacity-75"></span>
+                          <span class="relative inline-flex rounded-full h-2 w-2 bg-brand-cyan"></span>
+                        </span>
+                        Live Playground
+                    </a>
+                    <a href="#solutions" class="hover:text-white transition-colors">Solutions</a>
+                    <a href="#roi-calculator" class="hover:text-white transition-colors">ROI Calculator</a>
+                    <a href="#pricing" class="hover:text-white transition-colors">Pricing</a>
+                </nav>
+
+                <!-- Header Actions -->
+                <div class="flex items-center gap-4">
+                    <button onclick="openModal('login')" class="hidden sm:inline-flex text-sm font-medium text-gray-300 hover:text-white transition-colors px-3 py-2">
+                        Sign In
+                    </button>
+                    <button onclick="openModal('access')" class="relative group overflow-hidden rounded-xl p-px font-semibold text-xs sm:text-sm">
+                        <span class="absolute inset-0 bg-gradient-to-r from-brand-500 via-brand-cyan to-brand-accent transition-all duration-300 group-hover:opacity-90"></span>
+                        <span class="relative px-4 py-2.5 rounded-[11px] bg-dark-bg transition-all duration-300 group-hover:bg-opacity-0 block text-white flex items-center gap-2">
+                            <span>Get Early Access</span>
+                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden glow-bg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid lg:grid-cols-12 gap-12 items-center">
+                
+                <!-- Left Column: Copy -->
+                <div class="lg:col-span-6 space-y-8 text-center lg:text-left">
+                    <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-panel border-brand-500/30 text-xs text-brand-400 font-mono">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-brand-cyan animate-pulse"></i>
+                        <span>Turn 2D Blueprints into 1:1 AR Spatial Models</span>
+                    </div>
+
+                    <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1]">
+                        <span class="gradient-text">Built for people, not aliens</span>
+                    </h1>
+
+                    <p class="text-lg text-gray-400 max-w-2xl mx-auto lg:mx-0 font-normal leading-relaxed">
+                        Upload any architectural PDF blueprint. Our AI vision engine automatically detects walls, doors, and rooms to instantly generate a 1:1 scale Augmented Reality walkthrough on your mobile device.
+                    </p>
+
+                    <!-- CTA Buttons & Social Proof -->
+                    <div class="pt-2 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
+                        <button onclick="openModal('access')" class="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-cyan text-white font-semibold text-base shadow-xl shadow-brand-500/25 transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2 group">
+                            <i data-lucide="smartphone" class="w-5 h-5"></i>
+                            <span>Get Early Access on Android</span>
+                            <i data-lucide="chevron-right" class="w-4 h-4 group-hover:translate-x-1 transition-transform"></i>
+                        </button>
+
+                        <a href="#interactive-demo" class="w-full sm:w-auto px-6 py-4 rounded-xl glass-panel hover:bg-white/5 text-gray-200 font-medium text-base border border-white/10 transition-all text-center flex items-center justify-center gap-2">
+                            <i data-lucide="play-circle" class="w-5 h-5 text-brand-cyan"></i>
+                            <span>Try Interactive Demo</span>
+                        </a>
+                    </div>
+
+                    <!-- Trust Metrics -->
+                    <div class="pt-6 border-t border-white/5 grid grid-cols-3 gap-4 text-center lg:text-left">
+                        <div>
+                            <div class="text-2xl font-bold text-white font-mono">&lt; 30s</div>
+                            <div class="text-xs text-gray-400">Conversion Speed</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-white font-mono">99.4%</div>
+                            <div class="text-xs text-gray-400">Wall Recognition</div>
+                        </div>
+                        <div>
+                            <div class="text-2xl font-bold text-white font-mono">1:1 Scale</div>
+                            <div class="text-xs text-gray-400">ARCore Accuracy</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Interactive 3D Hero Preview Canvas -->
+                <div class="lg:col-span-6 relative">
+                    <div class="relative mx-auto max-w-lg lg:max-w-none animate-float-3d">
+                        
+                        <!-- Decorative glow -->
+                        <div class="absolute -inset-1 bg-gradient-to-r from-brand-600 to-brand-cyan rounded-3xl blur-2xl opacity-30 animate-pulse-slow"></div>
+
+                        <!-- 3D Viewport Card -->
+                        <div class="relative glass-panel tilt-card rounded-2xl p-4 sm:p-6 border border-white/10 shadow-2xl">
+                            <!-- Header bar -->
+                            <div class="flex items-center justify-between pb-4 mb-4 border-b border-white/10">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+                                    <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                                    <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+                                    <span class="ml-2 text-xs font-mono text-gray-400">sample_floorplan_v3.pdf</span>
+                                </div>
+                                <div class="flex items-center gap-2 bg-dark-surface px-3 py-1 rounded-lg border border-white/5">
+                                    <i data-lucide="view" class="w-3.5 h-3.5 text-brand-cyan"></i>
+                                    <span id="heroViewModeLabel" class="text-xs font-mono text-brand-cyan">3D Extruded View</span>
+                                </div>
+                            </div>
+
+                            <!-- Canvas Container -->
+                            <div class="relative w-full h-80 sm:h-96 rounded-xl overflow-hidden bg-dark-bg border border-white/5">
+                                <canvas id="heroCanvas" class="w-full h-full cursor-grab active:cursor-grabbing"></canvas>
+                                
+                                <!-- Canvas overlay badge -->
+                                <div class="absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none">
+                                    <div class="glass-panel px-3 py-1.5 rounded-lg text-xs font-mono text-gray-300 flex items-center gap-2 pointer-events-auto">
+                                        <i data-lucide="rotate-3d" class="w-4 h-4 text-brand-400"></i>
+                                        <span>Drag to rotate 3D mesh</span>
+                                    </div>
+                                    <button id="heroToggleWallsBtn" onclick="toggleHeroWalls()" class="glass-panel hover:bg-brand-600/30 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors border border-brand-500/30 flex items-center gap-1.5 pointer-events-auto">
+                                        <i data-lucide="layers" class="w-3.5 h-3.5 text-brand-cyan"></i>
+                                        <span id="wallBtnText">Flatten to 2D</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Live status indicator -->
+                            <div class="mt-4 flex items-center justify-between text-xs text-gray-400 font-mono">
+                                <span class="flex items-center gap-1.5 text-brand-emerald">
+                                    <span class="w-2 h-2 rounded-full bg-brand-emerald animate-ping"></span>
+                                    AI Vision Model Active
+                                </span>
+                                <span>3 Rooms • 12 Walls Detected</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section id="how-it-works" class="py-24 bg-dark-surface/50 border-y border-white/5 relative">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-brand-cyan mb-3">Seamless Pipeline</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">3 Simple Steps from PDF to Physical Space</p>
+                <p class="mt-4 text-gray-400">No manual 3D modeling required. Our automated computer vision pipeline does all the heavy lifting in seconds.</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8 relative">
+                
+                <!-- Step 1 -->
+                <div class="glass-panel glass-panel-hover p-8 rounded-2xl relative group">
+                    <div class="w-14 h-14 rounded-xl bg-brand-500/10 border border-brand-500/20 text-brand-400 flex items-center justify-center font-mono text-xl font-bold mb-6 group-hover:scale-110 group-hover:bg-brand-500 group-hover:text-white transition-all">
+                        01
+                    </div>
+                    <div class="flex items-center gap-2 text-xs font-mono text-brand-cyan mb-2">
+                        <i data-lucide="file-up" class="w-4 h-4"></i>
+                        <span>PDF / Vector Import</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Upload PDF Blueprint</h3>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Import any standard architectural floorplan PDF or scanned blueprint directly from your Android phone or cloud drive.
+                    </p>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="glass-panel glass-panel-hover p-8 rounded-2xl relative group">
+                    <div class="w-14 h-14 rounded-xl bg-brand-cyan/10 border border-brand-cyan/20 text-brand-cyan flex items-center justify-center font-mono text-xl font-bold mb-6 group-hover:scale-110 group-hover:bg-brand-cyan group-hover:text-dark-bg transition-all">
+                        02
+                    </div>
+                    <div class="flex items-center gap-2 text-xs font-mono text-brand-cyan mb-2">
+                        <i data-lucide="cpu" class="w-4 h-4"></i>
+                        <span>Neural Extrusion Engine</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">AI Vision Extrusion</h3>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Our Vision AI parses wall thickness, door cutouts, windows, and room dimensions, auto-generating a clean 3D mesh model.
+                    </p>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="glass-panel glass-panel-hover p-8 rounded-2xl relative group">
+                    <div class="w-14 h-14 rounded-xl bg-brand-accent/10 border border-brand-accent/20 text-brand-accent flex items-center justify-center font-mono text-xl font-bold mb-6 group-hover:scale-110 group-hover:bg-brand-accent group-hover:text-white transition-all">
+                        03
+                    </div>
+                    <div class="flex items-center gap-2 text-xs font-mono text-brand-cyan mb-2">
+                        <i data-lucide="glasses" class="w-4 h-4"></i>
+                        <span>ARCore Spatial Sync</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-3">Instant AR Walkthrough</h3>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Anchor the house onto any physical floor or outdoor space at 1:1 scale or dollhouse scale to inspect with clients.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Live Playground Section -->
+    <section id="interactive-demo" class="py-24 relative overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-12">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-cyan/10 border border-brand-cyan/20 text-brand-cyan text-xs font-mono mb-4">
+                    <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
+                    <span>Live Interactive Simulator</span>
+                </div>
+                <h2 class="text-3xl sm:text-4xl font-extrabold text-white">Experience AI Floorplan Extrusion Live</h2>
+                <p class="mt-3 text-gray-400">Select a layout preset or adjust the wall extrusion height and door openings in real-time.</p>
+            </div>
+
+            <!-- Playground Interface Grid -->
+            <div class="grid lg:grid-cols-12 gap-8 items-start">
+                
+                <!-- Controls Side (4 Cols) -->
+                <div class="lg:col-span-4 space-y-6">
+                    <div class="glass-panel p-6 rounded-2xl border border-white/10 space-y-6">
+                        <h3 class="text-lg font-bold text-white border-b border-white/10 pb-3 flex items-center justify-between">
+                            <span>Blueprint Presets</span>
+                            <span class="text-xs font-mono text-brand-cyan">Select Layout</span>
+                        </h3>
+
+                        <!-- Preset Switcher -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <button onclick="switchPreset('modern')" id="preset-modern" class="preset-btn active p-3 rounded-xl border border-brand-500 bg-brand-500/20 text-left transition-all">
+                                <div class="text-xs font-bold text-white">Modern Studio</div>
+                                <div class="text-[10px] text-gray-400 font-mono mt-1">1 Bed • 1 Bath • 65m²</div>
+                            </button>
+                            <button onclick="switchPreset('villa')" id="preset-villa" class="preset-btn p-3 rounded-xl border border-white/10 bg-dark-bg hover:border-white/20 text-left transition-all">
+                                <div class="text-xs font-bold text-white">Luxury Villa</div>
+                                <div class="text-[10px] text-gray-400 font-mono mt-1">3 Bed • 2 Bath • 180m²</div>
+                            </button>
+                        </div>
+
+                        <!-- Parametric Controls -->
+                        <div class="space-y-4 pt-2">
+                            <div>
+                                <div class="flex justify-between text-xs font-mono mb-2">
+                                    <span class="text-gray-300">Wall Extrusion Height</span>
+                                    <span id="wallHeightVal" class="text-brand-cyan">2.8 meters</span>
+                                </div>
+                                <input type="range" id="wallHeightInput" min="0.2" max="4.0" step="0.1" value="2.8" class="w-full" oninput="update3DParameters()">
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between text-xs font-mono mb-2">
+                                    <span class="text-gray-300">Wall Thickness</span>
+                                    <span id="wallThickVal" class="text-brand-cyan">20 cm</span>
+                                </div>
+                                <input type="range" id="wallThickInput" min="10" max="40" step="2" value="20" class="w-full" oninput="update3DParameters()">
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between text-xs font-mono mb-2">
+                                    <span class="text-gray-300">Rendering Mode</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button onclick="setRenderStyle('solid')" id="style-solid" class="style-btn px-3 py-2 rounded-lg bg-brand-600 text-white text-xs font-medium border border-brand-400">Solid Architectural</button>
+                                    <button onclick="setRenderStyle('wireframe')" id="style-wireframe" class="style-btn px-3 py-2 rounded-lg bg-dark-bg text-gray-400 text-xs font-medium border border-white/10 hover:border-white/20">Wireframe Vector</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Stats & Info -->
+                        <div class="bg-dark-bg p-4 rounded-xl border border-white/5 space-y-2 text-xs font-mono">
+                            <div class="flex justify-between text-gray-400">
+                                <span>Detected Polygons:</span>
+                                <span class="text-white">1,480 tris</span>
+                            </div>
+                            <div class="flex justify-between text-gray-400">
+                                <span>Door Cutouts:</span>
+                                <span class="text-white">4 Extruded</span>
+                            </div>
+                            <div class="flex justify-between text-gray-400">
+                                <span>Parsing Latency:</span>
+                                <span class="text-brand-emerald">0.14 seconds</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3D Viewer Side (8 Cols) -->
+                <div class="lg:col-span-8">
+                    <div class="glass-panel rounded-2xl p-4 border border-white/10 shadow-2xl relative">
+                        <div class="flex items-center justify-between pb-3 px-2 border-b border-white/10">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-brand-emerald"></span>
+                                <span class="text-xs font-mono text-gray-300">Interactive 3D WebGL Canvas</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <button onclick="resetCamera()" class="text-xs text-gray-400 hover:text-white flex items-center gap-1 font-mono transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                                    <span>Reset View</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Viewport Canvas -->
+                        <div class="relative w-full h-[420px] sm:h-[480px] bg-dark-bg rounded-xl overflow-hidden mt-3">
+                            <canvas id="playgroundCanvas" class="w-full h-full cursor-grab active:cursor-grabbing"></canvas>
+                            
+                            <!-- Mode indicator overlay -->
+                            <div class="absolute top-4 left-4 bg-dark-bg/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-xs font-mono text-gray-300 flex items-center gap-2">
+                                <i data-lucide="box" class="w-4 h-4 text-brand-cyan"></i>
+                                <span id="playgroundStatusText">Rendering 3D Wall Extrusions</span>
+                            </div>
+
+                            <!-- Mobile Help Tag -->
+                            <div class="absolute bottom-4 left-4 text-[11px] font-mono text-gray-400 bg-dark-bg/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/5">
+                                Left Click + Drag to rotate | Right Click to pan
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Target Audience Solutions -->
+    <section id="solutions" class="py-24 bg-dark-surface/40 border-t border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-brand-cyan mb-3">Tailored Use Cases</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">Built for Industry Professionals</p>
+                <p class="mt-4 text-gray-400">Stop forcing clients to imagine 2D lines. Give them full spatial comprehension on day one.</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                
+                <!-- Real Estate Agents -->
+                <div class="glass-panel glass-panel-hover p-8 rounded-2xl border border-white/10">
+                    <div class="w-12 h-12 rounded-xl bg-brand-500/10 text-brand-400 flex items-center justify-center mb-6">
+                        <i data-lucide="home" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-2">Real Estate Agents</h3>
+                    <p class="text-xs font-mono text-brand-cyan mb-4">Close Deals 3x Faster</p>
+                    <p class="text-gray-400 text-sm leading-relaxed mb-6">
+                        Show buyers the exact spatial layout of unbuilt properties directly on site using AR. Turn flat floorplan brochures into memorable walkthroughs.
+                    </p>
+                    <ul class="space-y-2.5 text-xs text-gray-300 font-mono">
+                        <li class="flex items-center gap-2">
+                            <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                            <span>Instant 1:1 scale walk-ins</span>
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                            <span>No extra VR hardware required</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Interior Designers -->
+                <div class="glass-panel glass-panel-hover p-8 rounded-2xl border border-white/10">
+                    <div class="w-12 h-12 rounded-xl bg-brand-cyan/10 text-brand-cyan flex items-center justify-center mb-6">
+                        <i data-lucide="palette" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-2">Interior Designers</h3>
+                    <p class="text-xs font-mono text-brand-cyan mb-4">Eliminate Spatial Revision Loops</p>
+                    <p class="text-gray-400 text-sm leading-relaxed mb-6">
+                        Verify clearances, window sightlines, and room flow instantly. Drop Virtual furniture into the generated AR wall bounds.
+                    </p>
+                    <ul class="space-y-2.5 text-xs text-gray-300 font-mono">
+                        <li class="flex items-center gap-2">
+                            <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                            <span>Accurate wall cutouts & height</span>
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                            <span>Client spatial alignment</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Contractors -->
+                <div class="glass-panel glass-panel-hover p-8 rounded-2xl border border-white/10">
+                    <div class="w-12 h-12 rounded-xl bg-brand-accent/10 text-brand-accent flex items-center justify-center mb-6">
+                        <i data-lucide="hammer" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-white mb-2">Contractors & Builders</h3>
+                    <p class="text-xs font-mono text-brand-cyan mb-4">Prevent On-Site Framing Errors</p>
+                    <p class="text-gray-400 text-sm leading-relaxed mb-6">
+                        Overlay 3D wall frames directly over empty slabs before laying studs or pouring concrete. Spot framing mismatches early.
+                    </p>
+                    <ul class="space-y-2.5 text-xs text-gray-300 font-mono">
+                        <li class="flex items-center gap-2">
+                            <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                            <span>Site alignment verification</span>
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                            <span>Avoid costly rework</span>
+                        </li>
+                    </ul>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- ROI Calculator Section -->
+    <section id="roi-calculator" class="py-24 relative glow-bg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="glass-panel rounded-3xl p-8 sm:p-12 border border-white/10">
+                <div class="grid lg:grid-cols-12 gap-12 items-center">
+                    
+                    <!-- Left Column: Inputs -->
+                    <div class="lg:col-span-6 space-y-6">
+                        <div>
+                            <span class="text-xs font-mono font-semibold text-brand-cyan uppercase tracking-wider">Calculate Savings</span>
+                            <h2 class="text-3xl font-extrabold text-white mt-2">See Your Estimated ROI & Time Saved</h2>
+                            <p class="text-gray-400 text-sm mt-2">Compare traditional CAD 3D modeling costs with automated AI PDF-to-AR conversion.</p>
+                        </div>
+
+                        <div class="space-y-5 pt-2">
+                            <div>
+                                <div class="flex justify-between text-xs font-mono mb-2">
+                                    <span class="text-gray-300">Floor Plans Processed / Month</span>
+                                    <span id="roiPlansVal" class="text-brand-cyan font-bold">12 Plans</span>
+                                </div>
+                                <input type="range" id="roiPlansInput" min="1" max="50" value="12" class="w-full" oninput="calculateROI()">
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between text-xs font-mono mb-2">
+                                    <span class="text-gray-300">Avg CAD Drafter Rate ($/hr)</span>
+                                    <span id="roiRateVal" class="text-brand-cyan font-bold">$65 / hr</span>
+                                </div>
+                                <input type="range" id="roiRateInput" min="30" max="150" step="5" value="65" class="w-full" oninput="calculateROI()">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Outputs Box -->
+                    <div class="lg:col-span-6">
+                        <div class="bg-dark-bg rounded-2xl p-8 border border-brand-500/30 space-y-6">
+                            <div class="grid grid-cols-2 gap-6 text-center">
+                                <div class="p-4 rounded-xl bg-dark-surface border border-white/5">
+                                    <div class="text-xs font-mono text-gray-400 mb-1">Hours Saved / Month</div>
+                                    <div id="roiHoursOutput" class="text-3xl sm:text-4xl font-extrabold text-brand-cyan font-mono">48 hrs</div>
+                                </div>
+                                <div class="p-4 rounded-xl bg-dark-surface border border-white/5">
+                                    <div class="text-xs font-mono text-gray-400 mb-1">Est. Cost Savings / Mo</div>
+                                    <div id="roiSavingsOutput" class="text-3xl sm:text-4xl font-extrabold text-brand-emerald font-mono">$3,072</div>
+                                </div>
+                            </div>
+
+                            <div class="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 text-xs text-gray-300 font-mono space-y-2">
+                                <div class="flex justify-between">
+                                    <span>Traditional 3D Modeling Time:</span>
+                                    <span class="text-gray-400">4.0 hrs / plan</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>PlanAR Conversion Time:</span>
+                                    <span class="text-brand-emerald">30 seconds / plan</span>
+                                </div>
+                            </div>
+
+                            <button onclick="openModal('access')" class="w-full py-3.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm transition-all shadow-lg shadow-brand-500/20 text-center">
+                                Start Saving Time with PlanAR
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-24 relative">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-brand-cyan mb-3">Transparent Pricing</h2>
+                <p class="text-3xl sm:text-4xl font-extrabold text-white">Invest in Faster Project Turnarounds</p>
+                <p class="mt-4 text-gray-400">Choose a plan that scales with your architectural workflow. Unused credits rollover.</p>
+            </div>
+
+            <!-- Pricing Cards Grid -->
+            <div class="grid md:grid-cols-3 gap-8 items-stretch">
+                
+                <!-- Starter Tier -->
+                <div class="glass-panel p-8 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <div>
+                        <div class="text-xs font-mono text-gray-400 uppercase tracking-wider mb-2">Starter</div>
+                        <div class="flex items-baseline gap-1 mb-4">
+                            <span class="text-4xl font-extrabold text-white">$19</span>
+                            <span class="text-gray-400 text-sm">/ month</span>
+                        </div>
+                        <p class="text-gray-400 text-xs leading-relaxed mb-6">Ideal for independent realtors and individual designers starting with AR.</p>
+                        
+                        <ul class="space-y-3 text-xs text-gray-300 font-mono mb-8">
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>10 PDF Conversions / mo</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>1:1 Scale AR Walking Mode</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>Standard Wall & Door Extrusion</span>
+                            </li>
+                            <li class="flex items-center gap-2 text-gray-500">
+                                <i data-lucide="x" class="w-4 h-4"></i>
+                                <span>High-Res GLTF/OBJ Exports</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <button onclick="openModal('access')" class="w-full py-3 rounded-xl glass-panel hover:bg-white/10 text-white font-medium text-xs transition-colors border border-white/10">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Pro Tier (Featured) -->
+                <div class="relative glass-panel p-8 rounded-2xl border-2 border-brand-500 shadow-2xl flex flex-col justify-between">
+                    <div class="absolute -top-3.5 left-1/2 transform -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-brand-600 to-brand-cyan text-white text-[11px] font-mono font-bold tracking-wider uppercase shadow-lg">
+                        Most Popular
+                    </div>
+                    <div>
+                        <div class="text-xs font-mono text-brand-cyan uppercase tracking-wider mb-2">Pro Professional</div>
+                        <div class="flex items-baseline gap-1 mb-4">
+                            <span class="text-4xl font-extrabold text-white">$49</span>
+                            <span class="text-gray-400 text-sm">/ month</span>
+                        </div>
+                        <p class="text-gray-400 text-xs leading-relaxed mb-6">Built for active agencies, contractors, and busy design studios.</p>
+                        
+                        <ul class="space-y-3 text-xs text-gray-300 font-mono mb-8">
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span><strong>50 PDF Conversions</strong> / mo</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>Dollhouse & 1:1 Scale AR</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>GLTF & OBJ 3D Model Export</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>Custom Materials & Floor Textures</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <button onclick="openModal('access')" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-cyan text-white font-semibold text-xs transition-all shadow-lg shadow-brand-500/25">
+                        Start Pro Trial
+                    </button>
+                </div>
+
+                <!-- Enterprise Tier -->
+                <div class="glass-panel p-8 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <div>
+                        <div class="text-xs font-mono text-gray-400 uppercase tracking-wider mb-2">Enterprise</div>
+                        <div class="flex items-baseline gap-1 mb-4">
+                            <span class="text-4xl font-extrabold text-white">Custom</span>
+                        </div>
+                        <p class="text-gray-400 text-xs leading-relaxed mb-6">For large construction firms needing API access and multi-seat licensing.</p>
+                        
+                        <ul class="space-y-3 text-xs text-gray-300 font-mono mb-8">
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>Unlimited Floorplan Conversions</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>REST API & Vision Pipeline Access</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>White-label AR Branding</span>
+                            </li>
+                            <li class="flex items-center gap-2">
+                                <i data-lucide="check" class="w-4 h-4 text-brand-emerald"></i>
+                                <span>Dedicated Account Manager</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <button onclick="openModal('access')" class="w-full py-3 rounded-xl glass-panel hover:bg-white/10 text-white font-medium text-xs transition-colors border border-white/10">
+                        Contact Sales
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-dark-bg border-t border-white/10 py-12 text-xs text-gray-500">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+                <div>
+                    <div class="flex items-center gap-2 text-white font-bold text-base mb-4">
+                        <i data-lucide="box" class="w-5 h-5 text-brand-400"></i>
+                        <span>PlanAR</span>
+                    </div>
+                    <p class="text-gray-400 leading-relaxed">AI-driven 2D floorplan rasterization to 3D spatial AR walkthrough engine for Android.</p>
+                </div>
+                <div>
+                    <div class="text-white font-medium mb-3 font-mono">Product</div>
+                    <ul class="space-y-2">
+                        <li><a href="#how-it-works" class="hover:text-gray-300">How It Works</a></li>
+                        <li><a href="#interactive-demo" class="hover:text-gray-300">3D Playground</a></li>
+                        <li><a href="#pricing" class="hover:text-gray-300">Pricing Tiers</a></li>
+                        <li><a href="#" class="hover:text-gray-300">Android SDK</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="text-white font-medium mb-3 font-mono">Solutions</div>
+                    <ul class="space-y-2">
+                        <li><a href="#solutions" class="hover:text-gray-300">Real Estate</a></li>
+                        <li><a href="#solutions" class="hover:text-gray-300">Interior Design</a></li>
+                        <li><a href="#solutions" class="hover:text-gray-300">General Contractors</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="text-white font-medium mb-3 font-mono">Legal & Tech</div>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="hover:text-gray-300">Privacy Policy</a></li>
+                        <li><a href="#" class="hover:text-gray-300">Terms of Service</a></li>
+                        <li><a href="#" class="hover:text-gray-300">ARCore Compatibility</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="pt-8 border-t border-white/5 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div>&copy; 2026 PlanAR Technologies Inc. All rights reserved.</div>
+                <div class="flex items-center gap-4">
+                    <a href="#" class="hover:text-gray-300"><i data-lucide="twitter" class="w-4 h-4"></i></a>
+                    <a href="#" class="hover:text-gray-300"><i data-lucide="github" class="w-4 h-4"></i></a>
+                    <a href="#" class="hover:text-gray-300"><i data-lucide="linkedin" class="w-4 h-4"></i></a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Modal Dialog for Early Access -->
+    <div id="accessModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="glass-panel max-w-md w-full rounded-2xl p-6 border border-white/10 relative">
+            <button onclick="closeModal('access')" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <div class="flex items-center gap-2 text-brand-cyan font-mono text-xs mb-2">
+                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                <span>Private Android Beta</span>
+            </div>
+            <h3 class="text-xl font-bold text-white mb-2">Request Early Access</h3>
+            <p class="text-gray-400 text-xs mb-6">Join 400+ real estate professionals testing our closed-source PDF-to-AR engine.</p>
+            
+            <form onsubmit="handleFormSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-mono text-gray-300 mb-1">Work Email</label>
+                    <input type="email" required placeholder="alex@company.com" class="w-full bg-dark-bg border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-mono text-gray-300 mb-1">Primary Role</label>
+                    <select class="w-full bg-dark-bg border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500">
+                        <option>Real Estate Agent</option>
+                        <option>Interior Designer</option>
+                        <option>General Contractor / Builder</option>
+                        <option>Architect / Drafter</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full py-3.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm transition-all shadow-lg shadow-brand-500/20">
+                    Get Beta Invite
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Add 3D Tilt interactive mouse dynamics to Glass Cards
+        document.addEventListener('mousemove', (e) => {
+            const cards = document.querySelectorAll('.tilt-card, .glass-panel-hover');
+            const mouseX = e.clientX;
+            const mouseY = e.clientY;
+
+            cards.forEach(card => {
+                const rect = card.getBoundingClientRect();
+                const cardX = rect.left + rect.width / 2;
+                const cardY = rect.top + rect.height / 2;
+
+                const angleX = (mouseY - cardY) / 30;
+                const angleY = (cardX - mouseX) / 30;
+
+                // Check if mouse is within proximity of the element
+                const distance = Math.hypot(mouseX - cardX, mouseY - cardY);
+                if (distance < 500) {
+                    card.style.transform = `perspective(1000px) rotateX(${angleX * 0.4}deg) rotateY(${angleY * 0.4}deg) translateZ(8px)`;
+                } else {
+                    card.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) translateZ(0px)`;
+                }
+            });
+        });
+
+        // -------------------------------------------------------------
+        // THREE.JS HERO CANVAS ENGINE (WITH 3D PARTICLES & ANIMATIONS)
+        // -------------------------------------------------------------
+        let heroScene, heroCamera, heroRenderer, heroHouseGroup, heroParticles;
+        let isWallsExtruded = true;
+
+        function initHeroCanvas() {
+            const container = document.getElementById('heroCanvas').parentElement;
+            const canvas = document.getElementById('heroCanvas');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            heroScene = new THREE.Scene();
+            heroScene.background = new THREE.Color(0x090a0f);
+
+            heroCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+            heroCamera.position.set(12, 14, 16);
+            heroCamera.lookAt(0, 0, 0);
+
+            heroRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            heroRenderer.setSize(width, height);
+            heroRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            heroScene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0x818cf8, 1.2);
+            dirLight.position.set(10, 20, 15);
+            heroScene.add(dirLight);
+
+            const pointLight = new THREE.PointLight(0x06b6d4, 1, 30);
+            pointLight.position.set(0, 5, 0);
+            heroScene.add(pointLight);
+
+            // Floor Grid plane
+            const gridHelper = new THREE.GridHelper(20, 20, 0x4f46e5, 0x1f2438);
+            gridHelper.position.y = -0.01;
+            heroScene.add(gridHelper);
+
+            // 3D Ambient Dust Particles
+            const particleGeo = new THREE.BufferGeometry();
+            const particleCount = 120;
+            const posArray = new Float32Array(particleCount * 3);
+
+            for(let i=0; i < particleCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 20;
+            }
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particleMat = new THREE.PointsMaterial({
+                size: 0.08,
+                color: 0x06b6d4,
+                transparent: true,
+                opacity: 0.6
+            });
+            heroParticles = new THREE.Points(particleGeo, particleMat);
+            heroScene.add(heroParticles);
+
+            // Build House Group
+            heroHouseGroup = new THREE.Group();
+            buildHeroHouseMesh();
+            heroScene.add(heroHouseGroup);
+
+            // Orbit interaction state
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+
+                heroHouseGroup.rotation.y += deltaMove.x * 0.008;
+                heroHouseGroup.rotation.x += deltaMove.y * 0.008;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mouseup', () => { isDragging = false; });
+
+            // Render loop with continuous 3D particle floats
+            let clock = new THREE.Clock();
+            function animate() {
+                requestAnimationFrame(animate);
+                const elapsedTime = clock.getElapsedTime();
+
+                if (!isDragging) {
+                    heroHouseGroup.rotation.y += 0.005; // Smooth continuous 3D rotation
+                    heroHouseGroup.position.y = Math.sin(elapsedTime * 1.5) * 0.15; // Floating movement
+                }
+
+                if (heroParticles) {
+                    heroParticles.rotation.y = elapsedTime * 0.05;
+                }
+
+                heroRenderer.render(heroScene, heroCamera);
+            }
+            animate();
+        }
+
+        function buildHeroHouseMesh() {
+            // Clear existing
+            while(heroHouseGroup.children.length > 0){ 
+                heroHouseGroup.remove(heroHouseGroup.children[0]); 
+            }
+
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0x4f46e5,
+                roughness: 0.2,
+                metalness: 0.1,
+                wireframe: false
+            });
+
+            const wallHeight = isWallsExtruded ? 2.5 : 0.1;
+
+            // Simple 3-room layout box walls
+            const wallData = [
+                // Outer boundaries
+                { x: 0, z: -4, w: 10, d: 0.3 },
+                { x: 0, z: 4, w: 10, d: 0.3 },
+                { x: -5, z: 0, w: 0.3, d: 8.3 },
+                { x: 5, z: 0, w: 0.3, d: 8.3 },
+                // Inner partitions
+                { x: 0, z: 0, w: 0.3, d: 5 },
+                { x: -2.5, z: 1, w: 5, d: 0.3 }
+            ];
+
+            wallData.forEach(w => {
+                const geom = new THREE.BoxGeometry(w.w, wallHeight, w.d);
+                const mesh = new THREE.Mesh(geom, wallMaterial);
+                mesh.position.set(w.x, wallHeight / 2, w.z);
+                heroHouseGroup.add(mesh);
+            });
+
+            // Floor plane outline
+            const floorGeom = new THREE.PlaneGeometry(10.2, 8.5);
+            const floorMat = new THREE.MeshBasicMaterial({ color: 0x11131e, side: THREE.DoubleSide });
+            const floorMesh = new THREE.Mesh(floorGeom, floorMat);
+            floorMesh.rotation.x = Math.PI / 2;
+            heroHouseGroup.add(floorMesh);
+        }
+
+        function toggleHeroWalls() {
+            isWallsExtruded = !isWallsExtruded;
+            buildHeroHouseMesh();
+            document.getElementById('wallBtnText').innerText = isWallsExtruded ? "Flatten to 2D" : "Extrude to 3D";
+            document.getElementById('heroViewModeLabel').innerText = isWallsExtruded ? "3D Extruded View" : "2D Blueprint Overlay";
+        }
+
+        // -------------------------------------------------------------
+        // THREE.JS PLAYGROUND CANVAS ENGINE
+        // -------------------------------------------------------------
+        let pgScene, pgCamera, pgRenderer, pgMeshGroup;
+        let pgWallHeight = 2.8;
+        let pgWallThickness = 0.2;
+        let pgStyle = 'solid';
+        let currentPreset = 'modern';
+
+        function initPlaygroundCanvas() {
+            const container = document.getElementById('playgroundCanvas').parentElement;
+            const canvas = document.getElementById('playgroundCanvas');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            pgScene = new THREE.Scene();
+            pgScene.background = new THREE.Color(0x090a0f);
+
+            pgCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+            pgCamera.position.set(16, 18, 20);
+            pgCamera.lookAt(0, 0, 0);
+
+            pgRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            pgRenderer.setSize(width, height);
+            pgRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            // Lights
+            const amb = new THREE.AmbientLight(0xffffff, 0.7);
+            pgScene.add(amb);
+
+            const dir = new THREE.DirectionalLight(0x06b6d4, 1.2);
+            dir.position.set(15, 25, 10);
+            pgScene.add(dir);
+
+            const grid = new THREE.GridHelper(30, 30, 0x6366f1, 0x1f2438);
+            grid.position.y = -0.01;
+            pgScene.add(grid);
+
+            pgMeshGroup = new THREE.Group();
+            pgScene.add(pgMeshGroup);
+
+            buildPlaygroundMesh();
+
+            // Interactivity
+            let isDragging = false;
+            let prevMouse = { x: 0, y: 0 };
+
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                prevMouse = { x: e.clientX, y: e.clientY };
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const deltaX = e.clientX - prevMouse.x;
+                const deltaY = e.clientY - prevMouse.y;
+
+                pgMeshGroup.rotation.y += deltaX * 0.008;
+                pgMeshGroup.rotation.x += deltaY * 0.008;
+                prevMouse = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mouseup', () => { isDragging = false; });
+
+            function animate() {
+                requestAnimationFrame(animate);
+                pgRenderer.render(pgScene, pgCamera);
+            }
+            animate();
+        }
+
+        function buildPlaygroundMesh() {
+            while(pgMeshGroup.children.length > 0) {
+                pgMeshGroup.remove(pgMeshGroup.children[0]);
+            }
+
+            const isWire = pgStyle === 'wireframe';
+            const mat = new THREE.MeshStandardMaterial({
+                color: isWire ? 0x06b6d4 : 0x6366f1,
+                wireframe: isWire,
+                roughness: 0.3,
+                metalness: 0.2
+            });
+
+            // Modern studio layout or Villa layout
+            let walls = [];
+            if (currentPreset === 'modern') {
+                walls = [
+                    { x: 0, z: -5, w: 12, d: pgWallThickness },
+                    { x: 0, z: 5, w: 12, d: pgWallThickness },
+                    { x: -6, z: 0, w: pgWallThickness, d: 10 },
+                    { x: 6, z: 0, w: pgWallThickness, d: 10 },
+                    { x: -1, z: 1, w: pgWallThickness, d: 6 }, // bathroom wall
+                    { x: -3.5, z: -2, w: 5, d: pgWallThickness }
+                ];
+            } else { // Villa layout
+                walls = [
+                    { x: 0, z: -7, w: 16, d: pgWallThickness },
+                    { x: 0, z: 7, w: 16, d: pgWallThickness },
+                    { x: -8, z: 0, w: pgWallThickness, d: 14 },
+                    { x: 8, z: 0, w: pgWallThickness, d: 14 },
+                    { x: 0, z: 0, w: 16, d: pgWallThickness }, // central hallway
+                    { x: -2, z: -3.5, w: pgWallThickness, d: 7 },
+                    { x: 3, z: 3.5, w: pgWallThickness, d: 7 }
+                ];
+            }
+
+            walls.forEach(w => {
+                const geom = new THREE.BoxGeometry(w.w, pgWallHeight, w.d);
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.position.set(w.x, pgWallHeight / 2, w.z);
+                pgMeshGroup.add(mesh);
+            });
+        }
+
+        function update3DParameters() {
+            pgWallHeight = parseFloat(document.getElementById('wallHeightInput').value);
+            pgWallThickness = parseFloat(document.getElementById('wallThickInput').value) / 100;
+
+            document.getElementById('wallHeightVal').innerText = pgWallHeight.toFixed(1) + " meters";
+            document.getElementById('wallThickVal').innerText = Math.round(pgWallThickness * 100) + " cm";
+
+            buildPlaygroundMesh();
+        }
+
+        function switchPreset(preset) {
+            currentPreset = preset;
+            document.querySelectorAll('.preset-btn').forEach(btn => {
+                btn.classList.remove('border-brand-500', 'bg-brand-500/20');
+                btn.classList.add('border-white/10', 'bg-dark-bg');
+            });
+            const activeBtn = document.getElementById('preset-' + preset);
+            activeBtn.classList.remove('border-white/10', 'bg-dark-bg');
+            activeBtn.classList.add('border-brand-500', 'bg-brand-500/20');
+
+            buildPlaygroundMesh();
+        }
+
+        function setRenderStyle(style) {
+            pgStyle = style;
+            document.querySelectorAll('.style-btn').forEach(btn => {
+                btn.classList.remove('bg-brand-600', 'text-white', 'border-brand-400');
+                btn.classList.add('bg-dark-bg', 'text-gray-400', 'border-white/10');
+            });
+            const activeBtn = document.getElementById('style-' + style);
+            activeBtn.classList.remove('bg-dark-bg', 'text-gray-400', 'border-white/10');
+            activeBtn.classList.add('bg-brand-600', 'text-white', 'border-brand-400');
+
+            buildPlaygroundMesh();
+        }
+
+        function resetCamera() {
+            pgMeshGroup.rotation.set(0, 0, 0);
+            pgCamera.position.set(16, 18, 20);
+            pgCamera.lookAt(0, 0, 0);
+        }
+
+        // -------------------------------------------------------------
+        // ROI CALCULATOR LOGIC
+        // -------------------------------------------------------------
+        function calculateROI() {
+            const plans = parseInt(document.getElementById('roiPlansInput').value);
+            const rate = parseInt(document.getElementById('roiRateInput').value);
+
+            document.getElementById('roiPlansVal').innerText = plans + " Plans";
+            document.getElementById('roiRateVal').innerText = "$" + rate + " / hr";
+
+            // Traditional vs PlanAR
+            const hoursPerPlanTraditional = 4.0; // 4 hours in CAD
+            const totalHoursSaved = Math.round(plans * (hoursPerPlanTraditional - 0.05));
+            const totalSavings = Math.round(totalHoursSaved * rate);
+
+            document.getElementById('roiHoursOutput').innerText = totalHoursSaved + " hrs";
+            document.getElementById('roiSavingsOutput').innerText = "$" + totalSavings.toLocaleString();
+        }
+
+        // -------------------------------------------------------------
+        // MODAL HANDLERS
+        // -------------------------------------------------------------
+        function openModal(type) {
+            document.getElementById('accessModal').classList.remove('hidden');
+        }
+
+        function closeModal(type) {
+            document.getElementById('accessModal').classList.add('hidden');
+        }
+
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            alert("Thank you! Your request for early Android beta access has been received.");
+            closeModal('access');
+        }
+
+        // Handle Responsive Canvas Resizing
+        window.addEventListener('resize', () => {
+            if (heroRenderer && heroCamera) {
+                const c = document.getElementById('heroCanvas').parentElement;
+                heroCamera.aspect = c.clientWidth / c.clientHeight;
+                heroCamera.updateProjectionMatrix();
+                heroRenderer.setSize(c.clientWidth, c.clientHeight);
+            }
+            if (pgRenderer && pgCamera) {
+                const c = document.getElementById('playgroundCanvas').parentElement;
+                pgCamera.aspect = c.clientWidth / c.clientHeight;
+                pgCamera.updateProjectionMatrix();
+                pgRenderer.setSize(c.clientWidth, c.clientHeight);
+            }
+        });
+
+        // Initialize Canvases on Page Load
+        window.onload = function() {
+            initHeroCanvas();
+            initPlaygroundCanvas();
+            calculateROI();
+
+            // Smoothly fade out 3D shimmer overlay after animation completes
+            setTimeout(() => {
+                const overlay = document.getElementById('pageShimmerOverlay');
+                if (overlay) {
+                    overlay.style.opacity = '0';
+                    setTimeout(() => {
+                        overlay.style.display = 'none';
+                    }, 700);
+                }
+            }, 2000);
+        };
+    </script>
+</body>
+</html>
